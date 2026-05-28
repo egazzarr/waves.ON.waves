@@ -1,8 +1,10 @@
-# Master Media Deisgn Thesis
+# Master Media Design Thesis
 ## HEAD, Geneva
 ### 2026/27
 
-This folder leaves a trace of my documentation for my master thesis, centered around sailing, speculative cartography and DIY electronics. 
+This folder leaves a trace of my documentation for my master thesis.
+
+![](photos/triangle.jpg)
 
 #### [This](https://docs.google.com/document/d/1QyAFCbq82Wv2VnBwuYVfgGu0j2MKPr-Xfmq18WlifTQ/edit?usp=sharing) is the Google doc where I write stuff, mainly comments about the environment and about books that I read
 #### [This](https://www.tldraw.com/f/SqBBJcFgW7ncyqGTwlZJ2?d=v-590.1794.1807.930.page) is the board where I dump ideas and images
