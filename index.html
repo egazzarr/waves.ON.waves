@@ -22,6 +22,7 @@
   </nav>
 
   <main id="content"></main>
+  <svg id="wave" viewBox="0 0 24 48" aria-hidden="true"><path d="M8 5 C 21 13, 21 21, 12 24 S 3 35, 16 43"/></svg>
 
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
   <script>
@@ -38,9 +39,25 @@
       content.innerHTML = response.ok
         ? marked.parse(await response.text())
         : '<p>Could not load ' + name + '.md</p>';
+      updateWave();
     }
     window.addEventListener('hashchange', show);
     show();
+
+    // Blue tilde on the dividing line: top of the screen at the start of the
+    // reading, bottom of the screen at the end.
+    const wave = document.getElementById('wave');
+    function updateWave() {
+      const c = document.getElementById('content');
+      const scrollable = c.scrollHeight - c.clientHeight;
+      wave.style.visibility = scrollable > 1 ? 'visible' : 'hidden';
+      const read = scrollable > 1 ? c.scrollTop / scrollable : 0;
+      wave.style.top = read * (window.innerHeight - wave.clientHeight) + 'px';
+    }
+    const content = document.getElementById('content');
+    content.addEventListener('scroll', updateWave);
+    content.addEventListener('load', updateWave, true); // images finishing load
+    window.addEventListener('resize', updateWave);
   </script>
 </body>
 </html>

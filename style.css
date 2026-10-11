@@ -9,6 +9,7 @@
   --text-size: 1rem;
   --gap: 2rem;
   --line: 1px solid #111;
+  --wave: #0033ff;
 }
 
 * {
@@ -100,4 +101,23 @@ a:hover {
 .photo-row img {
   flex: 1;
   min-width: 0;
+}
+
+/* One vertical blue tilde on the dividing line: it slides from the top
+   to the bottom as you read, showing how much is left */
+#wave {
+  position: fixed;
+  top: 0;
+  left: 33.333%;
+  width: 24px;
+  height: 48px;
+  margin-left: -12px;
+  pointer-events: none;
+}
+
+#wave path {
+  fill: none;
+  stroke: var(--wave);
+  stroke-width: 6;
+  stroke-linecap: round;
 }
