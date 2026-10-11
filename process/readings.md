@@ -14,8 +14,8 @@ Deleuze, Gilles, and Félix Guattari. Mille Plateaux. Collection “Critique,”
 
 Dodge, Martin, and Rob Kitchin. Atlas of Cyberspace. 1. publ. Addison-Wesley, 2001.
 
-Donovan, Kate. “Expanding Radio. Ecological Thinking and Trans-Scalar Encounters in Contemporary Radio Art Practice.” Universität Potsdam, Institut Für Anglistik Und Amerikanistik, Master’s Programme Anglophone Modernities in Literature and Culture, 2018. https://www.academia.edu/38624566/Expanding_Radio_Ecological_Thinking_and_Trans_scalar_Encounters_in_Contemporary_Radio_Art_Practice.
-.
+Donovan, Kate. “Expanding Radio. Ecological Thinking and Trans-Scalar Encounters in Contemporary Radio Art Practice.” Universität Potsdam, Institut Für Anglistik Und Amerikanistik, Master’s Programme Anglophone Modernities in Literature and Culture, 2018. 
+
 Dunne, Anthony. Hertzian Tales: Electronic Products, Aesthetic Experience, and Critical Design. 1. MIT Press paperback ed. MIT Press, 2008.
 
 Edgerton, David. The Shock of the Old: Technology and Global History since 1900. 1. publ. in Great Britain. Profile Books, 2006.

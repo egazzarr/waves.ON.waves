@@ -4,7 +4,7 @@
 
 **How did you become so interested in radio? What inspires you about it?**
 
-**Kate:** For me it started with relations — relations with the environment, but also with people. We began this as a seminar in 2021, and slowly it became Radio Otherwise. I was working within a radio community and doing sound art, and I started thinking about waves, about materiality, about connection. Different species perceive the electromagnetic spectrum in completely different ways, and that's something I kept coming back to.
+**Kate:** For me it started with relations: relations with the environment, but also with people. We began this as a seminar in 2021, and slowly it became Radio Otherwise. I was working within a radio community and doing sound art, and I started thinking about waves, about materiality, about connection. Different species perceive the electromagnetic spectrum in completely different ways, and that's something I kept coming back to.
 
 My master's thesis was on the Anthropocene, on human-generated material. We talk endlessly about concrete and plastics, but we almost never think of electromagnetism as part of that same story. I was also drawn to feminist practices, to the non-Western origins of radio, and more specifically to amateur and pirate radio.
 
@@ -28,7 +28,7 @@ Amateur radio has its own regulations, but they're largely upheld through self-p
 
 **Do you know of any works that bring together radio waves and the sea?**
 
-Pirate radio in the 1960s was all about boats — going offshore, into a kind of no man's land. Even the name "pirate radio" comes from that.
+Pirate radio in the 1960s was all about boats, going offshore, into a kind of no man's land. Even the name "pirate radio" comes from that.
 
 **What's the easiest way to build a listening device I could bring on a boat? What about antennas?**
 
@@ -36,7 +36,7 @@ For a VLF antenna, we can send you the recipe, but you'll probably only end up l
 
 The crystal radio is the simplest receiver there is: just one diode, plus a ground connection. You can add a coil, which works as the tuning coil. There's an old book on this, too. You should also look at Ioana Vreme Moser, an artist working with radio, connected to the Locus Sonus project in Aix-en-Provence and Marseille.
 
-**Kate:** My advice would be to buy a CB — a Citizens Band radio, the hardcore walkie-talkie type. Legally, you're allowed to just talk into it.
+**Kate:** My advice would be to buy a CB (a Citizens Band radio, the hardcore walkie-talkie type). Legally, you're allowed to just talk into it.
 
 ## References
 
