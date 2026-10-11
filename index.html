@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>waves.ON.waves</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,700;1,300;1,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <nav id="menu">
+    <a id="title" href="#">waves.ON.waves</a>
+    <a href="#research_questions">research questions</a>
+    <a href="#gordan">gordan savičić</a>
+    <a href="#selena">selena savić</a>
+    <a href="#radio_otherwise">radio otherwise</a>
+    <a href="#participant_observation">participant observation</a>
+    <a href="#readings">readings</a>
+  </nav>
+
+  <main id="content"></main>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script>
+    // Each menu link points to process/<name>.md. No name = the glitch image.
+    async function show() {
+      const name = location.hash.slice(1);
+      const content = document.getElementById('content');
+      content.scrollTop = 0;
+      if (!name) {
+        content.innerHTML = '<img id="glitch" src="photos/glitch.png" alt="">';
+        return;
+      }
+      const response = await fetch('process/' + name + '.md');
+      content.innerHTML = response.ok
+        ? marked.parse(await response.text())
+        : '<p>Could not load ' + name + '.md</p>';
+    }
+    window.addEventListener('hashchange', show);
+    show();
+  </script>
+</body>
+</html>
