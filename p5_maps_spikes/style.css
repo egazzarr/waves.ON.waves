@@ -1,0 +1,13 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  font: 300 12px "Merriweather", Georgia, serif;
+}
+
+canvas {
+  display: block;
+}
+
+button, input, textarea {
+  font: inherit;
+}

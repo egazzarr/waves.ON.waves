@@ -87,6 +87,14 @@ a:hover {
   width: 100%;
 }
 
+.experiment-frame {
+  display: block;
+  width: 100%;
+  height: calc(100vh - (2 * var(--gap)));
+  min-height: 36rem;
+  border: 0;
+}
+
 /* Interview questions (written as **bold** in the .md files) */
 #content strong {
   font-weight: 700;
