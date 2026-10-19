@@ -4,7 +4,7 @@
    Black / grey lines on a TRANSPARENT background, with shapes filled white or black,
    and big text on top.
 
-   Brushes   1 spikes   2 maps   3 lines   4 small text (click)   5 big text (click)   6 draw line (drag)
+   Brushes   1 spikes   2 maps   3 lines   4 small text (click)   5 big text (click)   6 draw line (drag)   7 square (drag)
    Keys      L live (draw by moving / only while pressed)   A auto (strokes appear by themselves)
              B background (transparent / white / black)   C color (black / electric blue / pink / orange / gold)   Z undo   X clear   G more strokes
              S save PNG   [ ] brush size
@@ -29,8 +29,9 @@ const COLORS = {                     // ink colour of the whole drawing (key C c
   orange: [255, 100, 0],
   gold: [140, 106, 40],
 };
+const hasGridMask = () => items.some(o => o.square && o.grid && !o.dead);
 
-let hollowNow = false, items = [], growers = [], strokes = [], SID = 0, count = 0, cur = null, down = false;
+let hollowNow = false, items = [], growers = [], strokes = [], strokeLayers = {}, SID = 0, count = 0, cur = null, down = false;
 let brush = 'spikes', size = 40, textSize = 8, bigSize = 120, growth = 1, pointy = 0.3, pull = 0.5, live = true, auto = false, bg = 0;
 let mp = null, mouseHd = 0, lastMove = 0, ctx = null, layer = null, lctx = null, ui = {};
 let colorName = 'black', PAL = {};
@@ -47,6 +48,7 @@ const blobPts = (x, y, r, n = 7) => Array.from({ length: n }, (_, k) => [x + Mat
 // items: growing ones stay "live" and are redrawn every frame; finished ones are baked into one picture
 const add = (o, fixed) => {
   o.sid = SID;
+  if (strokeLayers[o.sid]) { o.aboveGrid = strokeLayers[o.sid]; }
   if (o.lw && o.lineAlpha === undefined) { o.lineAlpha = randomAlpha(); }
   o.live = !fixed && !o.big;
   items.push(o);
@@ -56,14 +58,21 @@ const add = (o, fixed) => {
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const inside = (x, y) => x >= EDGE && x <= W0 - EDGE && y >= EDGE && y <= H0 - EDGE;
 const fits = o => {                                               // false when any point of the mark would touch or cross the border
+  if (o.square) { return inside(o.x, o.y) && inside(o.x + o.side[0], o.y + o.side[1]); }
   if (o.rows) { return true; }
   if (o.lines) { const w = Math.max(...o.lines.map(l => l.length)) * o.size * .62, h = o.lines.length * (o.lh || o.size * 1.4); return inside(o.x, o.y - h) && inside(o.x + w, o.y + h); }
   const ps = o.multi ? o.pts.flat() : o.pts; return !ps || ps.every(q => inside(q[0], q[1]));
 };
-const margin = () => EDGE + ((brush === 'text' || brush === 'big') ? 0 : size * 1.6);
+const margin = () => EDGE + ((brush === 'text' || brush === 'big' || brush === 'square') ? 0 : size * 1.6);
 const keep = p => { const m = margin(); return [clamp(p[0], m, W0 - m), clamp(p[1], m, H0 - m)]; };
-const bake = o => { o.live = false; if (!fits(o)) { o.dead = true; return; } if (!o.big && lctx) { renderItem(lctx, o); } };
-const rebuild = () => { lctx.clearRect(0, 0, W0, H0); items.forEach(o => { if (!o.live && !o.big && !o.dead) { renderItem(lctx, o); } }); };
+const bake = o => {
+  if (!fits(o)) { o.dead = true; return; }
+  if (o.aboveGrid) { o.live = true; return; }
+  if (o.foreground) { o.live = true; return; }
+  o.live = false;
+  if (!o.foreground && !o.big && lctx) { renderItem(lctx, o); }
+};
+const rebuild = () => { lctx.clearRect(0, 0, W0, H0); items.forEach(o => { if (!o.live && !o.foreground && !o.big && !o.dead) { renderItem(lctx, o); } }); };
 
 /* ---------------------------------------------------------------- p5 */
 
@@ -85,7 +94,9 @@ function draw() {
   ctx.clearRect(0, 0, W0, H0);
   if (bg) { ctx.fillStyle = bg === 1 ? '#fff' : '#000'; ctx.fillRect(0, 0, W0, H0); }
   ctx.drawImage(layer, 0, 0);
-  items.forEach(o => { if (o.live && !o.dead) { renderItem(ctx, o); } });
+  items.forEach(o => { if (o.live && !o.foreground && !o.aboveGrid && !o.dead) { renderItem(ctx, o); } });
+  items.forEach(o => { if (o.live && o.foreground && !o.aboveGrid && !o.dead) { renderItem(ctx, o); } });
+  items.forEach(o => { if (o.live && o.aboveGrid && !o.dead) { renderItem(ctx, o); } });
   items.forEach(o => { if (o.big) { renderItem(ctx, o); } });
   if (!auto && growers.length === 0 && !cur && !down) { noLoop(); }
 }
@@ -112,12 +123,12 @@ const attach = cv => {
   });
   window.addEventListener('pointerup', () => {
     down = false;
-    if (cur && (brush === 'drawline' || !live)) { endStroke(cur); cur = null; }
+    if (cur && (brush === 'drawline' || brush === 'square' || !live)) { endStroke(cur); cur = null; }
   });
   cv.addEventListener('pointerleave', () => { mp = null; if (cur) { endStroke(cur); cur = null; } });
   window.addEventListener('keydown', e => {
     if (e.target && ['INPUT', 'TEXTAREA'].includes(e.target.tagName)) { return; }
-    const k = e.key.toLowerCase(), b = { 1: 'spikes', 2: 'maps', 3: 'circuits', 4: 'text', 5: 'big', 6: 'drawline' }[k];
+    const k = e.key.toLowerCase(), b = { 1: 'spikes', 2: 'maps', 3: 'circuits', 4: 'text', 5: 'big', 6: 'drawline', 7: 'square' }[k];
     if (b) { pick(b === 'circuits' ? 'lines' : b); }
     if (k === 'z') { undo(); } if (k === 'x') { clearAll(); } if (k === 'g') { each(6, autoStroke); settle(); loop(); } if (k === 's') { savePNG(); }
     if (k === 'a') { toggle('auto'); } if (k === 'l') { toggle('live'); } if (k === 'b') { cycleBg(); } if (k === 'c') { cycleColor(); }
@@ -127,11 +138,15 @@ const attach = cv => {
 
 const startStroke = p => {
   SID = ++count; strokes.push(SID); cur = { id: SID, last: p, hold: [] };
+  cur.aboveGrid = (brush === 'spikes' || brush === 'maps') && (!hasGridMask() || Math.random() < .5);
+  strokeLayers[SID] = cur.aboveGrid;
   BR[brush].begin(cur, p); BR[brush].move(cur, p, 0, 1e9);
 };
-const endStroke = c => { (c.hold || []).forEach(bake); c.hold = []; };
+const endStroke = c => {
+  (c.hold || []).forEach(bake); c.hold = [];
+};
 
-const pick = b => { brush = b; ['drawline', 'spikes', 'maps', 'lines', 'text', 'big'].forEach(k => { if (ui[k]) ui[k].style.fontWeight = k === b ? 'bold' : 'normal'; }); };
+const pick = b => { brush = b; ['drawline', 'spikes', 'maps', 'lines', 'text', 'big', 'square'].forEach(k => { if (ui[k]) ui[k].style.fontWeight = k === b ? 'bold' : 'normal'; }); };
 const toggle = k => { if (k === 'auto') { auto = !auto; ui.auto.textContent = 'auto (A): ' + (auto ? 'on' : 'off'); } else { live = !live; ui.live.textContent = 'live (L): ' + (live ? 'on' : 'off'); } loop(); };
 const setColor = n => {                                           // every dark tone becomes the chosen colour; white and pale stay as they are
   colorName = n; const c = COLORS[n], rgba = (a, w = 0) => `rgba(${c.map(v => Math.round(v + (255 - v) * w)).join(',')},${a})`;
@@ -148,6 +163,7 @@ const buildUI = cv => {
   const btn = (txt, fn) => { const b = document.createElement('button'); b.textContent = txt; b.onclick = fn; bar.appendChild(b); return b; };
   const row = () => bar.appendChild(document.createElement('div'));
   ui.drawline = btn('draw line (6)', () => pick('drawline'));
+  ui.square = btn('square (7)', () => pick('square'));
   ['spikes (1)', 'maps (2)', 'circuits (3)', 'text (4)', 'big text (5)'].forEach((t, i) => { ui[['spikes', 'maps', 'lines', 'text', 'big'][i]] = btn(t, () => pick(['spikes', 'maps', 'lines', 'text', 'big'][i])); });
   row();
   const textControl = (label, control) => {
@@ -180,8 +196,8 @@ const advance = () => {                                           // every growe
   growers = growers.filter(g => !g.done);
 };
 const settle = () => { each(150, () => { if (growers.length) { advance(); } }); };
-const undo = () => { const id = strokes.pop(); items = items.filter(i => i.sid !== id); growers = growers.filter(g => g.sid !== id); rebuild(); loop(); };
-const clearAll = () => { items = []; growers = []; strokes = []; cur = null; rebuild(); loop(); };
+const undo = () => { const id = strokes.pop(); delete strokeLayers[id]; items = items.filter(i => i.sid !== id); growers = growers.filter(g => g.sid !== id); rebuild(); loop(); };
+const clearAll = () => { items = []; growers = []; strokes = []; strokeLayers = {}; cur = null; rebuild(); loop(); };
 
 const autoStroke = () => {                                        // a stroke that starts near the mouse and heads the way it moves
   const b = choice(['spikes', 'spikes', 'maps', 'lines']), br = BR[b], s0 = size, near = mp && performance.now() - lastMove < 2500;
@@ -189,7 +205,8 @@ const autoStroke = () => {                                        // a stroke th
   const p = keep(near ? [mp[0] + R(-60, 60), mp[1] + R(-60, 60)] : [R(.1, .9) * W0, R(.1, .9) * H0]);
   let a = near ? mouseHd + R(-1.1, 1.1) : R(0, 6.28);
   SID = ++count; strokes.push(SID);
-  const c = { id: SID, hold: [] }, turn = R(-.08, .08), d = b === 'maps' ? size * .5 : 8;
+  const c = { id: SID, hold: [], aboveGrid: (b === 'spikes' || b === 'maps') && (!hasGridMask() || Math.random() < .5) }, turn = R(-.08, .08), d = b === 'maps' ? size * .5 : 8;
+  strokeLayers[SID] = c.aboveGrid;
   br.begin(c, p); br.move(c, p, a, 1e9);
   each(Math.floor(R(14, 40)), () => {
     a += turn + R(-.12, .12);
@@ -379,6 +396,43 @@ const drawLineMove = (c, p) => {
   c.line.pts.push(p.slice());
 };
 
+const squareGrid = (x, y, side, stepX, stepY) => {
+  const vertical = Array.from({ length: Math.max(0, Math.ceil(side[0] / stepX) - 1) }, (_, i) => {
+    const v = (i + 1) * stepX;
+    return [[x + v, y], [x + v, y + side[1]]];
+  });
+  const horizontal = Array.from({ length: Math.max(0, Math.ceil(side[1] / stepY) - 1) }, (_, i) => {
+    const v = (i + 1) * stepY;
+    return [[x, y + v], [x + side[0], y + v]];
+  });
+  return vertical.concat(horizontal);
+};
+
+const squareBegin = (c, p) => {
+  c.start = p.slice();
+  const stepX = Math.max(12, Math.round(size * R(.35, 1.15) / 6) * 6);
+  const stepY = Math.max(12, Math.round(size * R(.35, 1.15) / 6) * 6);
+  const grid = Math.random() >= .28;
+  c.square = add({
+    square: true, grid, x: p[0], y: p[1], side: [0, 0], stepX, stepY,
+    lw: R(.45, 1), col: LINE, pts: [], marks: [], foreground: grid,
+  });
+  c.hold.push(c.square);
+};
+
+const squareMove = (c, p) => {
+  const x = Math.min(c.start[0], p[0]), y = Math.min(c.start[1], p[1]);
+  const side = [Math.max(12, Math.abs(p[0] - c.start[0])), Math.max(12, Math.abs(p[1] - c.start[1]))];
+  c.square.x = clamp(x, EDGE, W0 - EDGE - side[0]);
+  c.square.y = clamp(y, EDGE, H0 - EDGE - side[1]);
+  c.square.side = [Math.min(side[0], W0 - EDGE - c.square.x), Math.min(side[1], H0 - EDGE - c.square.y)];
+  c.square.pts = squareGrid(c.square.x, c.square.y, c.square.side, c.square.stepX, c.square.stepY);
+  const xs = Array.from({ length: Math.max(0, Math.ceil(c.square.side[0] / c.square.stepX) - 1) }, (_, i) => (i + 1) * c.square.stepX);
+  const ys = Array.from({ length: Math.max(0, Math.ceil(c.square.side[1] / c.square.stepY) - 1) }, (_, i) => (i + 1) * c.square.stepY);
+  const density = c.square.grid ? .12 : .48;
+  c.square.marks = xs.flatMap(vx => ys.filter(() => Math.random() < density).map(vy => [c.square.x + vx, c.square.y + vy]));
+};
+
 const drawLineWidth = () => Math.min(18, Math.max(1, size * .18));
 
 const RAMPS = [' .:-=+*#%@', ' .,:;~=+*%#@', ' .`-/\\|+=*#@', ' .:-~=<>/\\|+*#%@&', ' ,;:!|=+*#%@'];       // only lines and symbols, no letters or numbers
@@ -416,6 +470,23 @@ const smoothPath = (c, p) => {                                    // rounded out
 const renderItem = (c, it) => {
   if (it.dead) { return; }
   c.lineJoin = 'round'; c.lineCap = 'round';
+  if (it.square) {
+    if (it.grid && it.foreground) {
+      if (bg === 0) {
+        c.clearRect(it.x, it.y, it.side[0], it.side[1]);
+      } else {
+        c.fillStyle = bg === 2 ? '#000' : '#fff';
+        c.fillRect(it.x, it.y, it.side[0], it.side[1]);
+      }
+    }
+    if (it.grid) {
+      c.lineWidth = it.lw; c.strokeStyle = tintAlpha(it.col, it.lineAlpha);
+      c.strokeRect(it.x, it.y, it.side[0], it.side[1]);
+      it.pts.forEach(path => { c.beginPath(); c.moveTo(path[0][0], path[0][1]); c.lineTo(path[1][0], path[1][1]); c.stroke(); });
+    }
+    it.marks.forEach(p => { c.fillStyle = tint(INK); c.fillRect(p[0] - 3, p[1] - 3, 6, 6); });
+    return;
+  }
   if (it.rows) {
     c.save(); c.translate(it.x, it.y); c.rotate(it.rot); c.textBaseline = 'top'; c.textAlign = 'left';
     const fs = it.cwu / .6, lh = it.cwu * 1.83;
@@ -462,7 +533,9 @@ const savePNG = () => {
   const c = document.createElement('canvas'); c.width = W; c.height = H;
   const x = c.getContext('2d'); x.scale(W / W0, W / W0);
   if (bg) { x.fillStyle = bg === 1 ? '#fff' : '#000'; x.fillRect(0, 0, W0, H0); }
-  items.filter(o => !o.big && !o.dead).forEach(o => renderItem(x, o));
+  items.filter(o => !o.big && !o.foreground && !o.aboveGrid && !o.dead).forEach(o => renderItem(x, o));
+  items.filter(o => o.foreground && !o.big && !o.aboveGrid && !o.dead).forEach(o => renderItem(x, o));
+  items.filter(o => o.aboveGrid && !o.big && !o.dead).forEach(o => renderItem(x, o));
   items.filter(o => o.big).forEach(o => renderItem(x, o));
   c.toBlob(async blob => {
     download(new Blob([withDpi(new Uint8Array(await blob.arrayBuffer()), DPI)], { type: 'image/png' }), `radio-lines_${DPI}dpi.png`);
@@ -488,6 +561,7 @@ const withDpi = (bytes, dpi) => {                                 // writes the 
 /* brushes (defined last because they refer to the functions above) */
 const BR = {
   drawline: { step: 1, begin: drawLineBegin, move: drawLineMove },
+  square:  { step: 2, begin: squareBegin, move: squareMove },
   spikes: { step: 7, begin(c) { c.sp = []; c.hd = 0; c.hol = Math.random() < .35; c.body = add(ink({ pts: [] }, c.hol)); c.hold.push(c.body); }, move: spikeMove },
   maps:   { step: 4, begin(c) { c.acc = 1e9; c.hd = 0; }, move: mapMove },
   lines:  { step: 3, begin(c, p) { c.g = [snap(p)]; c.dist = 0; c.d = [1, 0]; c.wire = add({ pts: [c.g[0].slice()], lw: .8, col: LINE }); c.hold.push(c.wire); }, move: lineMove },
