@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glitch Machine</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+<style>
+  :root { --bg:#0c0a1f; --panel:#16123a; --text:#e6e2ff; --muted:#9a93d6; --accent:#7d6bff; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:13px/1.4 system-ui, sans-serif;
+         display:flex; flex-wrap:wrap; gap:16px; padding:16px; min-height:100vh; }
+  #ui { width:240px; background:var(--panel); border-radius:10px; padding:14px; align-self:flex-start; }
+  #ui h1 { font-size:15px; margin:0 0 10px; }
+  #ui p { color:var(--muted); margin:0 0 12px; font-size:12px; }
+  .row { margin:10px 0; }
+  .row span { display:inline-block; }
+  .row .val { float:right; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .row input[type=range] { width:100%; accent-color:var(--accent); }
+  input[type=file] { width:100%; color:var(--muted); margin-bottom:6px; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:6px; padding:7px 10px;
+           margin:8px 6px 0 0; cursor:pointer; font:inherit; }
+  button:hover { filter:brightness(1.15); }
+  #ui h2 { font-size:13px; margin:16px 0 8px; }
+  #ui select { width:100%; background:var(--bg); color:var(--text); border:1px solid #3a3470;
+               border-radius:6px; padding:5px; font:inherit; }
+  .lbl { color:var(--muted); font-size:12px; margin:10px 0 4px; }
+  .swatches { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px; }
+  .sw { display:flex; flex-direction:column; align-items:center; font-size:11px; color:var(--muted); width:64px; }
+  input[type=color] { width:30px; height:30px; border:0; padding:0; background:none; cursor:pointer; }
+  #stage { flex:1; min-width:280px; display:flex; justify-content:center; align-items:flex-start; }
+  canvas { max-width:100%; height:auto !important; border-radius:4px; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <h1>Glitch Machine</h1>
+  <p>Load or drop an image onto the canvas. Keys: <b>R</b> reseed, <b>S</b> save.</p>
+</div>
+<div id="stage"></div>
+
+<script>
+// ---------- settings ----------
+const P = {
+  show: 0.3,     // how much of the original image shows through (0 = pure glitch, 1 = original)
+  wave: 0.6,     // sinusoidal row displacement
+  bands: 12,     // how many colour cycles across the brightness range (contour stripes)
+  stripes: 0.15, // fine vertical moiré stripes
+  slices: 5,     // horizontal bands shifted sideways
+  edges: 0.6,    // outlines
+  split: 1,      // chromatic channel offset (px)
+};
+
+// ---------- colours ----------
+// Each preset: 6 palette colours (cycled dark → light → back) and the edge colour.
+const PRESETS = {
+  'Blue / purple': { pal: ['#07042a', '#2a1bd6', '#7d74ff', '#ffffff', '#c58bff', '#4a12a8'],
+                     edge: '#1f51ff' },
+  'Mono':          { pal: ['#000000', '#333333', '#777777', '#ffffff', '#aaaaaa', '#222222'],
+                     edge: '#ffffff' },
+};
+let COL = JSON.parse(JSON.stringify(PRESETS['Blue / purple']));
+let EDGE;
+let pickers = {};
+
+let src, out, cnv, LUT = [];
+let seed = 1, t = 0, animating = false;
+
+// Export at 160 mm wide and 400 DPI while preserving the source aspect ratio.
+const EXPORT_DPI = 400;
+const EXPORT_WIDTH = Math.ceil(160 / 25.4 * EXPORT_DPI);
+
+// ---------- p5 lifecycle ----------
+function setup() {
+  pixelDensity(1);
+  cnv = createCanvas(10, 10);
+  cnv.parent('stage');
+  cnv.drop(handleFile);
+  buildLUT();
+  makeUI();
+  setSource(placeholder());
+  noLoop();
+}
+
+function draw() {
+  if (!src) return;
+  if (animating) t += 0.03;
+  glitch();
+  image(out, 0, 0);
+}
+
+function keyPressed() {
+  if (key === 'r' || key === 'R') { seed++; redraw(); }
+  if (key === 's' || key === 'S') savePrintPng();
+}
+
+// ---------- image loading ----------
+function handleFile(file) {
+  if (file.type === 'image') loadImage(file.data, setSource);
+}
+
+function setSource(img) {
+  const maxW = Math.max(300, Math.min(900, windowWidth - 290));
+  const maxH = Math.max(300, windowHeight - 32);
+  const sc = Math.min(maxW / img.width, maxH / img.height, 1);
+  src = img.get();
+  src.resize(Math.max(1, Math.round(img.width * sc)), Math.max(1, Math.round(img.height * sc)));
+  out = createImage(src.width, src.height);
+  resizeCanvas(src.width, src.height);
+  redraw();
+}
+
+function placeholder() {
+  const g = createGraphics(720, 960);
+  for (let y = 0; y < g.height; y++) {
+    g.stroke(lerpColor(color(250), color(30), y / g.height));
+    g.line(0, y, g.width, y);
+  }
+  g.noStroke();
+  g.fill(255); g.circle(360, 420, 380);
+  g.fill(20);  g.rect(120, 560, 480, 160);
+  g.fill(200); g.textAlign(CENTER, CENTER); g.textSize(36);
+  g.text('drop an image', 360, 850);
+  return g.get();
+}
+
+// ---------- palette ----------
+function rgb(hex) { const c = color(hex); return [red(c), green(c), blue(c)]; }
+
+function buildLUT() {
+  EDGE = rgb(COL.edge);
+  // repeat the first colour at the end so the cycle wraps without a hard seam
+  const cols = [...COL.pal, COL.pal[0]].map(c => color(c));
+  for (let i = 0; i < 256; i++) {
+    const f = i / 255 * (cols.length - 1);
+    const k = Math.min(Math.floor(f), cols.length - 2);
+    const c = lerpColor(cols[k], cols[k + 1], f - k);
+    LUT[i] = [red(c), green(c), blue(c)];
+  }
+}
+
+// ---------- the effect ----------
+function glitch() {
+  randomSeed(seed);
+  noiseSeed(seed);
+  const w = src.width, h = src.height, n = w * h;
+  src.loadPixels();
+  out.loadPixels();
+  const sp = src.pixels, op = out.pixels;
+
+  // 1. luminance of the source
+  const lum = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const j = i * 4;
+    lum[i] = (0.299 * sp[j] + 0.587 * sp[j + 1] + 0.114 * sp[j + 2]) / 255;
+  }
+
+  // 2. per-row horizontal offsets (wave) and colour phase
+  const off = new Float32Array(h), ph = new Float32Array(h);
+  for (let y = 0; y < h; y++) {
+    const a = noise(y * 0.004, t * 0.5);
+    off[y] = Math.sin(y * 0.045 + t * 3 + a * 8) * P.wave * w * 0.12 * a;
+    ph[y] = noise(y * 0.002 + 50, t * 0.3) * 3;
+  }
+  // 3. hard slice shifts
+  for (let k = 0; k < P.slices; k++) {
+    const y0 = Math.floor(random(h));
+    const hh = Math.floor(random(3, h * 0.09));
+    const s = random(-0.35, 0.35) * w;
+    const p = random(1);
+    for (let y = y0; y < Math.min(h, y0 + hh); y++) { off[y] += s; ph[y] += p; }
+  }
+
+  // 4. displace + map brightness through the cyclic palette (contour banding + moiré)
+  const disp = new Float32Array(n);
+  const sf = 0.6 + P.stripes * 1.6;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let sx = x + off[y] + Math.sin(x * 0.03 + y * 0.011 + t * 2) * P.wave * 8;
+      sx = ((Math.floor(sx) % w) + w) % w;
+      const i = y * w + x;
+      const v = lum[y * w + sx];
+      disp[i] = v;
+      let f = v * P.bands + Math.sin(x * sf + v * 12) * P.stripes * 0.5 + ph[y];
+      f -= Math.floor(f);
+      const c = LUT[(f * 255) | 0];
+      const j = i * 4;
+      op[j] = c[0]; op[j + 1] = c[1]; op[j + 2] = c[2]; op[j + 3] = 255;
+    }
+  }
+
+  // 5. outlines where the displaced image has strong edges
+  if (P.edges > 0) {
+    const th = 0.5 - P.edges * 0.45;
+    for (let y = 1; y < h; y++) {
+      for (let x = 1; x < w; x++) {
+        const i = y * w + x;
+        const d = Math.abs(disp[i] - disp[i - 1]) + Math.abs(disp[i] - disp[i - w]);
+        if (d > th) { const j = i * 4; op[j] = EDGE[0]; op[j + 1] = EDGE[1]; op[j + 2] = EDGE[2]; }
+      }
+    }
+  }
+
+  // 6. chromatic split (red one way, blue the other), original image show-through, faint scanlines
+  const s = P.split | 0;
+  const tmp = s > 0 ? new Uint8ClampedArray(op) : null;
+  const m = P.show, k = 1 - m;
+  for (let y = 0; y < h; y++) {
+    const dim = (y % 2 === 0) ? 1 : 0.9;
+    for (let x = 0; x < w; x++) {
+      const j = (y * w + x) * 4;
+      if (tmp) {
+        op[j]     = tmp[(y * w + Math.min(w - 1, x + s)) * 4];
+        op[j + 2] = tmp[(y * w + Math.max(0, x - s)) * 4 + 2];
+      }
+      op[j]     = (op[j]     * k + sp[j]     * m) * dim;
+      op[j + 1] = (op[j + 1] * k + sp[j + 1] * m) * dim;
+      op[j + 2] = (op[j + 2] * k + sp[j + 2] * m) * dim;
+    }
+  }
+
+  out.updatePixels();
+}
+
+// ---------- UI ----------
+function makeUI() {
+  createFileInput(handleFile).parent('ui');
+  addSlider('show',    'Show original', 0, 0.6, 0.01);
+  addSlider('wave',    'Wave',        0, 1.2, 0.01);
+  addSlider('bands',   'Colour bands', 1, 24, 1);
+  addSlider('stripes', 'Stripes',     0, 0.5, 0.01);
+  addSlider('slices',  'Slices',      0, 15, 1);
+  addSlider('edges',   'Edges',       0, 1, 0.01);
+  addSlider('split',   'RGB split',   0, 4, 1);
+
+  createButton('Reseed').parent('ui').mousePressed(() => { seed++; redraw(); });
+  const anim = createButton('Animate').parent('ui');
+  anim.mousePressed(() => {
+    animating = !animating;
+    anim.html(animating ? 'Stop' : 'Animate');
+    animating ? loop() : noLoop();
+  });
+  createButton('Save PNG (400 DPI)').parent('ui').mousePressed(savePrintPng);
+
+  // colour controls
+  createElement('h2', 'Colours').parent('ui');
+  const sel = createSelect().parent('ui');
+  Object.keys(PRESETS).forEach(n => sel.option(n));
+  sel.changed(() => { COL = JSON.parse(JSON.stringify(PRESETS[sel.value()])); syncPickers(); colourChanged(); });
+
+  createDiv('Glitch palette').parent('ui').class('lbl');
+  const pr = createDiv().parent('ui').class('swatches');
+  COL.pal.forEach((c, i) => {
+    const p = createColorPicker(c).parent(pr);
+    p.input(() => { COL.pal[i] = p.value(); colourChanged(); });
+    pickers['pal' + i] = p;
+  });
+
+  const er = createDiv().parent('ui').class('swatches');
+  [['edge', 'Edges']].forEach(([key, label]) => {
+    const wrap = createDiv().parent(er).class('sw');
+    const p = createColorPicker(COL[key]).parent(wrap);
+    createSpan(label).parent(wrap);
+    p.input(() => { COL[key] = p.value(); colourChanged(); });
+    pickers[key] = p;
+  });
+}
+
+function syncPickers() {
+  COL.pal.forEach((c, i) => pickers['pal' + i].value(c));
+  ['edge'].forEach(k => pickers[k].value(COL[k]));
+}
+
+function colourChanged() { buildLUT(); redraw(); }
+
+function savePrintPng() {
+  if (!cnv || !cnv.elt) return;
+
+  // PNG files describe print resolution through their pixel dimensions. The
+  // height follows the canvas aspect ratio so the image is not stretched.
+  const exportCanvas = document.createElement('canvas');
+  exportCanvas.width = EXPORT_WIDTH;
+  exportCanvas.height = Math.max(1, Math.round(EXPORT_WIDTH * cnv.height / cnv.width));
+  const context = exportCanvas.getContext('2d');
+  context.imageSmoothingEnabled = true;
+  context.drawImage(cnv.elt, 0, 0, EXPORT_WIDTH, exportCanvas.height);
+
+  exportCanvas.toBlob(blob => {
+    if (!blob) {
+      console.error('Could not create the PNG export.');
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'glitch-400dpi.png';
+    link.click();
+    URL.revokeObjectURL(url);
+  }, 'image/png');
+}
+
+function addSlider(key, label, min, max, step) {
+  const row = createDiv().parent('ui').class('row');
+  createSpan(label).parent(row);
+  const val = createSpan(String(P[key])).parent(row).class('val');
+  const s = createSlider(min, max, P[key], step).parent(row);
+  s.input(() => { P[key] = s.value(); val.html(String(s.value())); redraw(); });
+}
+</script>
+</body>
+</html>
