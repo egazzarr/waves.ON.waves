@@ -1,13 +1,13 @@
 /* RADIO LINES - generative drawing that follows your mouse (p5.js 1.x and 2.x)
    Move the mouse over the picture: marks grow where you move, in the direction you move,
-   and new strokes appear around the cursor by themselves. Growing thorns bend towards the mouse.
-   Black / grey lines on a TRANSPARENT background, with shapes filled white or black,
-   and big text on top.
+   and growing thorns bend towards the mouse.
+   Black / grey lines on a TRANSPARENT background, with shapes filled white or black.
 
-   Brushes   1 spikes   2 maps   3 lines   4 small text (click)   5 big text (click)   6 draw line (drag)   7 square (drag)
-             8 hatch (like spikes, but see-through: only thin, messy hatching lines inside)
-   Keys      L live (draw by moving / only while pressed)   A auto (strokes appear by themselves)
-             B background (transparent / white / black)   C color (black / blue / gold)   Z undo   X clear   G more strokes
+   Brushes   1 spikes   2 maps   3 lines   4 small text (click)   6 draw (drag)   7 grid (drag)
+             8 doodle (loose organic shapes near the path, see-through, with wavy open rings inside like zebra stripes / intestines)
+             9 circle (drag from the centre: a circle line, sometimes filled with a grainy concentric gradient)
+   Keys      L live (draw by moving / only while pressed)
+             C color (black / blue / gold)   Z undo   X clear   G more strokes
              S save PNG (named <file name>_<colour>.png)   [ ] brush size
    Click on the picture once so the keys work, or use the buttons. */
 
@@ -16,13 +16,12 @@ const DPI = 400;                    // PNG resolution: 300, 450, 600 ...
 const WHITE = 0.3, BLACK = 0.2;      // chance that a map shape is filled white / black (the rest stays transparent)
 
 const TEXT = ['We hold these black rectangles in our hands all day long.'];
-const BIG_TEXT = ['RADIO', 'CHANNEL 16', 'OVER', 'MAYDAY'];     // used when the big text box is empty
 const LABELS = ['A0', 'A1', 'A2', 'A12', 'D0', 'D7', 'IRQ', 'NMI', 'RDY', 'CLK', 'GND', '+5V', 'R/W', 'PHI2', 'TX', 'RX', 'PTT', 'ANT', 'SQL', 'DSC'];
 
 const EDGE = 16;                      // nothing is drawn closer than this to the border (design units, of 1000 across)
 const W0 = 1000, H0 = Math.round(1000 * SIZE_MM[1] / SIZE_MM[0]);
 const INK = 'rgba(8,8,8,.97)', WHITEF = 'rgba(255,255,255,.93)', LINE = 'rgba(15,15,15,.88)', GREYL = 'rgba(60,60,60,.8)', PALE = 'rgba(235,235,235,.85)';
-const TXT = 'rgba(30,30,30,.88)', BIGINK = 'rgba(0,0,0,.95)';
+const TXT = 'rgba(30,30,30,.88)';
 const COLORS = {                     // ink colour of the whole drawing (key C cycles). null = the original black / grey
   black: null,
   blue: [14, 34, 210],
@@ -31,7 +30,7 @@ const COLORS = {                     // ink colour of the whole drawing (key C c
 const hasGridMask = () => items.some(o => o.square && o.grid && !o.dead);
 
 let hollowNow = false, items = [], growers = [], strokes = [], strokeLayers = {}, SID = 0, count = 0, cur = null, down = false;
-let brush = 'spikes', size = 40, textSize = 8, bigSize = 120, growth = 1, pointy = 0.3, pull = 0.5, live = true, auto = false, bg = 0;
+let brush = 'spikes', size = 40, textSize = 8, growth = 1, pointy = 0.3, pull = 0.5, live = true;
 let mp = null, mouseHd = 0, lastMove = 0, ctx = null, layer = null, lctx = null, ui = {};
 let colorName = 'black', PAL = {};
 
@@ -49,7 +48,7 @@ const add = (o, fixed) => {
   o.sid = SID;
   if (strokeLayers[o.sid]) { o.aboveGrid = strokeLayers[o.sid]; }
   if (o.lw && o.lineAlpha === undefined) { o.lineAlpha = randomAlpha(); }
-  o.live = !fixed && !o.big;
+  o.live = !fixed;
   items.push(o);
   if (fixed) { bake(o); }
   return o;
@@ -58,20 +57,20 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const inside = (x, y) => x >= EDGE && x <= W0 - EDGE && y >= EDGE && y <= H0 - EDGE;
 const fits = o => {                                               // false when any point of the mark would touch or cross the border
   if (o.square) { return inside(o.x, o.y) && inside(o.x + o.side[0], o.y + o.side[1]); }
-  if (o.rows) { return true; }
+  if (o.circle) { return o.r >= 3; }                             // circles may run past the border: they are cut there
   if (o.lines) { const w = Math.max(...o.lines.map(l => l.length)) * o.size * .62, h = o.lines.length * (o.lh || o.size * 1.4); return inside(o.x, o.y - h) && inside(o.x + w, o.y + h); }
   const ps = o.multi ? o.pts.flat() : o.pts; return !ps || ps.every(q => inside(q[0], q[1]));
 };
-const margin = () => EDGE + ((brush === 'text' || brush === 'big' || brush === 'square') ? 0 : size * 1.6);
+const margin = () => EDGE + (['text', 'square', 'circle'].includes(brush) ? 0 : size * 1.6);
 const keep = p => { const m = margin(); return [clamp(p[0], m, W0 - m), clamp(p[1], m, H0 - m)]; };
 const bake = o => {
   if (!fits(o)) { o.dead = true; return; }
   if (o.aboveGrid) { o.live = true; return; }
   if (o.foreground) { o.live = true; return; }
   o.live = false;
-  if (!o.foreground && !o.big && lctx) { renderItem(lctx, o); }
+  if (!o.foreground && lctx) { renderItem(lctx, o); }
 };
-const rebuild = () => { lctx.clearRect(0, 0, W0, H0); items.forEach(o => { if (!o.live && !o.foreground && !o.big && !o.dead) { renderItem(lctx, o); } }); };
+const rebuild = () => { lctx.clearRect(0, 0, W0, H0); items.forEach(o => { if (!o.live && !o.foreground && !o.dead) { renderItem(lctx, o); } }); };
 
 /* ---------------------------------------------------------------- p5 */
 
@@ -88,16 +87,13 @@ function setup() {
 
 function draw() {
   advance();
-  if (auto && frameCount % 24 === 0 && items.length < 5000 && !down) { autoStroke(); }
   if (cur && performance.now() - lastMove > 300) { endStroke(cur); cur = null; }
   ctx.clearRect(0, 0, W0, H0);
-  if (bg) { ctx.fillStyle = bg === 1 ? '#fff' : '#000'; ctx.fillRect(0, 0, W0, H0); }
   ctx.drawImage(layer, 0, 0);
   items.forEach(o => { if (o.live && !o.foreground && !o.aboveGrid && !o.dead) { renderItem(ctx, o); } });
   items.forEach(o => { if (o.live && o.foreground && !o.aboveGrid && !o.dead) { renderItem(ctx, o); } });
   items.forEach(o => { if (o.live && o.aboveGrid && !o.dead) { renderItem(ctx, o); } });
-  items.forEach(o => { if (o.big) { renderItem(ctx, o); } });
-  if (!auto && growers.length === 0 && !cur && !down) { noLoop(); }
+  if (growers.length === 0 && !cur && !down) { noLoop(); }
 }
 
 /* ---------------------------------------------------------------- mouse, keys, interface */
@@ -107,14 +103,14 @@ const attach = cv => {
   cv.addEventListener('pointerdown', e => {
     down = true; const p = pos(e); mp = p; lastMove = performance.now();
     if (cur) { endStroke(cur); cur = null; }
-    if (brush === 'text' || brush === 'big') { startStroke(p); endStroke(cur); cur = null; } else { startStroke(p); }
+    if (brush === 'text') { startStroke(p); endStroke(cur); cur = null; } else { startStroke(p); }
     loop(); e.preventDefault();
   });
   cv.addEventListener('pointermove', e => {
     const p = pos(e);
     if (mp) { const d = Math.hypot(p[0] - mp[0], p[1] - mp[1]); if (d > 2) { mouseHd = lerpA(mouseHd, Math.atan2(p[1] - mp[1], p[0] - mp[0]), .3); } }
     mp = p; lastMove = performance.now();
-    if (!(live || down) || brush === 'text' || brush === 'big') { return; }
+    if (!(live || down) || brush === 'text') { return; }
     if (!cur) { startStroke(p); loop(); return; }
     const l = cur.last, d = Math.hypot(p[0] - l[0], p[1] - l[1]);
     if (d < BR[brush].step) { return; }
@@ -122,15 +118,15 @@ const attach = cv => {
   });
   window.addEventListener('pointerup', () => {
     down = false;
-    if (cur && (['drawline', 'square'].includes(brush) || !live)) { endStroke(cur); cur = null; }
+    if (cur && (['drawline', 'square', 'circle'].includes(brush) || !live)) { endStroke(cur); cur = null; }
   });
   cv.addEventListener('pointerleave', () => { mp = null; if (cur) { endStroke(cur); cur = null; } });
   window.addEventListener('keydown', e => {
     if (e.target && ['INPUT', 'TEXTAREA'].includes(e.target.tagName)) { return; }
-    const k = e.key.toLowerCase(), b = { 1: 'spikes', 2: 'maps', 3: 'circuits', 4: 'text', 5: 'big', 6: 'drawline', 7: 'square', 8: 'hatch' }[k];
+    const k = e.key.toLowerCase(), b = { 1: 'spikes', 2: 'maps', 3: 'circuits', 4: 'text', 6: 'drawline', 7: 'square', 8: 'hatch', 9: 'circle' }[k];
     if (b) { pick(b === 'circuits' ? 'lines' : b); }
     if (k === 'z') { undo(); } if (k === 'x') { clearAll(); } if (k === 'g') { each(6, autoStroke); settle(); loop(); } if (k === 's') { savePNG(); }
-    if (k === 'a') { toggle('auto'); } if (k === 'l') { toggle('live'); } if (k === 'b') { cycleBg(); } if (k === 'c') { cycleColor(); }
+    if (k === 'l') { toggle('live'); } if (k === 'c') { cycleColor(); }
     if (k === '[') { size = Math.max(10, size - 5); ui.size.value = size; } if (k === ']') { size = Math.min(100, size + 5); ui.size.value = size; }
   });
 };
@@ -145,26 +141,26 @@ const endStroke = c => {
   (c.hold || []).forEach(bake); c.hold = [];
 };
 
-const pick = b => { brush = b; ['drawline', 'spikes', 'maps', 'lines', 'text', 'big', 'square', 'hatch'].forEach(k => { if (ui[k]) ui[k].style.fontWeight = k === b ? 'bold' : 'normal'; }); };
-const toggle = k => { if (k === 'auto') { auto = !auto; ui.auto.textContent = 'auto (A): ' + (auto ? 'on' : 'off'); } else { live = !live; ui.live.textContent = 'live (L): ' + (live ? 'on' : 'off'); } loop(); };
+const pick = b => { brush = b; ['drawline', 'spikes', 'maps', 'lines', 'text', 'square', 'hatch', 'circle'].forEach(k => { if (ui[k]) ui[k].style.fontWeight = k === b ? 'bold' : 'normal'; }); };
+const toggle = () => { live = !live; ui.live.textContent = 'live (L): ' + (live ? 'on' : 'off'); loop(); };
 const setColor = n => {                                           // every dark tone becomes the chosen colour; white and pale stay as they are
   colorName = n; const c = COLORS[n], rgba = (a, w = 0) => `rgba(${c.map(v => Math.round(v + (255 - v) * w)).join(',')},${a})`;
-  PAL = c ? { [INK]: rgba(.97), [LINE]: rgba(.88), [GREYL]: rgba(.8, .35), [TXT]: rgba(.88), [BIGINK]: rgba(.95) } : {};
+  PAL = c ? { [INK]: rgba(.97), [LINE]: rgba(.88), [GREYL]: rgba(.8, .35), [TXT]: rgba(.88) } : {};
   if (ui.color) { ui.color.textContent = 'color (C): ' + n; }
   if (lctx) { rebuild(); } loop();
 };
 const cycleColor = () => { const ks = Object.keys(COLORS); setColor(ks[(ks.indexOf(colorName) + 1) % ks.length]); };
-const cycleBg = () => { bg = (bg + 1) % 3; ui.bg.textContent = 'background (B): ' + ['transparent', 'white', 'black'][bg]; loop(); };
 
 const buildUI = cv => {
   const bar = document.createElement('div'); bar.style.cssText = 'font:300 12px "Merriweather", Georgia, serif;max-width:560px;margin:6px 0';
   cv.parentNode.insertBefore(bar, cv.nextSibling);
   const btn = (txt, fn) => { const b = document.createElement('button'); b.textContent = txt; b.onclick = fn; bar.appendChild(b); return b; };
   const row = () => bar.appendChild(document.createElement('div'));
-  ui.drawline = btn('draw line (6)', () => pick('drawline'));
-  ui.square = btn('square (7)', () => pick('square'));
-  ui.hatch = btn('hatch (8)', () => pick('hatch'));
-  ['spikes (1)', 'maps (2)', 'circuits (3)', 'text (4)', 'big text (5)'].forEach((t, i) => { ui[['spikes', 'maps', 'lines', 'text', 'big'][i]] = btn(t, () => pick(['spikes', 'maps', 'lines', 'text', 'big'][i])); });
+  ui.drawline = btn('draw (6)', () => pick('drawline'));
+  ui.square = btn('grid (7)', () => pick('square'));
+  ui.hatch = btn('doodle (8)', () => pick('hatch'));
+  ui.circle = btn('circle (9)', () => pick('circle'));
+  ['spikes (1)', 'maps (2)', 'circuits (3)', 'text (4)'].forEach((t, i) => { ui[['spikes', 'maps', 'lines', 'text'][i]] = btn(t, () => pick(['spikes', 'maps', 'lines', 'text'][i])); });
   row();
   const textControl = (label, control) => {
     const d = document.createElement('div'), l = document.createElement('label');
@@ -173,8 +169,7 @@ const buildUI = cv => {
   const smallText = Object.assign(document.createElement('textarea'), { value: TEXT[0], rows: 3, cols: 30, id: 'smalltext' });
   smallText.style.verticalAlign = 'top';
   textControl('small text (4)', smallText);
-  textControl('big text (5)', Object.assign(document.createElement('input'), { value: 'RADIO', size: 10, id: 'bigtext' }));
-  row(); ui.live = btn('live (L): on', () => toggle('live')); ui.auto = btn('auto (A): off', () => toggle('auto')); ui.bg = btn('background (B): transparent', cycleBg);
+  row(); ui.live = btn('live (L): on', toggle);
   ui.color = btn('color (C): black', cycleColor);
   row(); textControl('file name', Object.assign(document.createElement('input'), { value: 'radio-lines', size: 16, id: 'filename' }));
   row(); btn('undo (Z)', undo); btn('clear (X)', clearAll); btn('more (G)', () => { each(6, autoStroke); settle(); loop(); }); btn('save PNG (S)', savePNG);
@@ -184,7 +179,6 @@ const buildUI = cv => {
   };
   ui.size = slider('brush size / line thickness', 10, 100, 1, size, v => { size = v; });
   ui.textsize = slider('small text size', 4, 20, 1, textSize, v => { textSize = v; });
-  ui.bigsize = slider('BIG text size', 20, 250, 1, bigSize, v => { bigSize = v; });
   slider('growth      ', .2, 2, .05, growth, v => { growth = v; });
   slider('pointy      ', 0, 1, .05, pointy, v => { pointy = v; });
   slider('mouse pull  ', 0, 1, .05, pull, v => { pull = v; });
@@ -200,13 +194,13 @@ const settle = () => { each(150, () => { if (growers.length) { advance(); } }); 
 const undo = () => { const id = strokes.pop(); delete strokeLayers[id]; items = items.filter(i => i.sid !== id); growers = growers.filter(g => g.sid !== id); rebuild(); loop(); };
 const clearAll = () => { items = []; growers = []; strokes = []; strokeLayers = {}; cur = null; rebuild(); loop(); };
 
-const autoStroke = () => {                                        // a stroke that starts near the mouse and heads the way it moves
-  const b = choice(['spikes', 'spikes', 'maps', 'lines']), br = BR[b], s0 = size, near = mp && performance.now() - lastMove < 2500;
+const autoStroke = () => {                                        // a stroke of any brush, starting near the mouse and heading the way it moves
+  const b = choice(['spikes', 'spikes', 'maps', 'maps', 'lines', 'hatch', 'hatch', 'circle', 'square', 'drawline', 'text']), br = BR[b], s0 = size, near = mp && performance.now() - lastMove < 2500;
   size = s0 * R(.6, 1.3);
   const p = keep(near ? [mp[0] + R(-60, 60), mp[1] + R(-60, 60)] : [R(.1, .9) * W0, R(.1, .9) * H0]);
   let a = near ? mouseHd + R(-1.1, 1.1) : R(0, 6.28);
   SID = ++count; strokes.push(SID);
-  const c = { id: SID, hold: [], aboveGrid: (b === 'spikes' || b === 'maps') && (!hasGridMask() || Math.random() < .5) }, turn = R(-.08, .08), d = b === 'maps' ? size * .5 : 8;
+  const c = { id: SID, hold: [], aboveGrid: ['spikes', 'maps', 'hatch'].includes(b) && (!hasGridMask() || Math.random() < .5) }, turn = R(-.08, .08), d = (b === 'maps' || b === 'hatch') ? size * .5 : (b === 'circle' || b === 'square') ? 4 : 8;
   strokeLayers[SID] = c.aboveGrid;
   br.begin(c, p); br.move(c, p, a, 1e9);
   each(Math.floor(R(14, 40)), () => {
@@ -225,18 +219,7 @@ const pt = (x, y, w, tp) => ({
   x, y, w, j: [R(-.3, .5), R(-.3, .5)],
   t: [Math.random() < tp * pointy ? R(.3, 1.1) * (.4 + .6 * pointy) : 0, Math.random() < tp * pointy ? R(.3, 1.1) * (.4 + .6 * pointy) : 0],
 });
-let hatchAng = .785;                                              // direction of the hatching for the current stroke
-const ink = (o, hol) => hol === 'hatch'
-  ? Object.assign(o, { closed: true, hatch: true, fill: null, lw: R(1.1, 1.8), lineAlpha: R(.75, 1), col: LINE, smooth: true, seed: R(0, 1000),
-                       layers: Array.from({ length: choice([1, 1, 1, 2, 2, 3]) }, (_, n) => ({    // 1-3 layers of hatching, crossing at odd angles
-                         ang: hatchAng + (n ? choice([1, -1]) * R(.4, 2) : R(-.35, .35)),
-                         gap: Math.max(6, size * R(.18, .32)),
-                         bend: R(-1, 1),            // how much the lines curve
-                         wob: R(.6, 2.6),           // how much they wander
-                         brk: R(.12, .42),          // how often they break off
-                         part: n ? R(.35, .8) : 1,  // extra layers only cover patches
-                       })) })
-  : Object.assign(o, { closed: true, fill: hol ? null : INK, fillAlpha: hol ? 1 : randomAlpha(), lw: hol ? 1.6 : 1 + (1 - pointy) * 4, col: INK, smooth: pointy < .75 });
+const ink = (o, hol) => Object.assign(o, { closed: true, fill: hol ? null : INK, fillAlpha: hol ? 1 : randomAlpha(), lw: hol ? 1.6 : 1 + (1 - pointy) * 4, col: INK, smooth: pointy < .75 });
 
 const ribbon = (sp, tooth) => {                                   // outline of a spine, with a few teeth leaning forward
   const L = [], Rr = [];
@@ -331,6 +314,78 @@ const blob = (x, y, hd, R0, small) => {                          // uneven messy
     each(Math.floor(R(3, 9) * growth), () => { const a = R(0, 6.28), d = R0 * el * R(1.1, 2.4); blob(x + Math.cos(a) * d, y + Math.sin(a) * d, R(0, 6.28), R0 * R(.06, .2), true); });
     each(Math.floor(R(2, 8) * growth), () => { const a = R(0, 6.28), d = R0 * el * R(1, 2.8); add({ pts: blobPts(x + Math.cos(a) * d, y + Math.sin(a) * d, R(.8, 2.2), 6), closed: true, fill: INK, fillAlpha: randomAlpha() }, true); });
   }
+};
+
+/* ---------------------------------------------------------------- doodle */
+
+const doodleMove = (c, p, ang, d) => {                            // drops loose shapes near the path, not on it
+  c.hd = lerpA(c.hd, ang, .35); c.acc += d;
+  if (c.acc < size * .8) { return; }
+  c.acc = 0;
+  const side = R(-.7, .7) * size;
+  doodle(p[0] - Math.sin(c.hd) * side, p[1] + Math.cos(c.hd) * side, c.hd + R(-.8, .8), size * R(.45, 1.1));
+  if (Math.random() < .4 * growth) { const a = R(0, 6.28), d2 = size * R(.9, 1.8); doodle(p[0] + Math.cos(a) * d2, p[1] + Math.sin(a) * d2, R(0, 6.28), size * R(.15, .35)); }
+};
+
+const openCurve = (path, pts) => {                                // smooth open line through the midpoints
+  path.moveTo(pts[0][0], pts[0][1]);
+  pts.slice(1, -1).forEach((q, i) => { const r = pts[i + 2]; path.quadraticCurveTo(q[0], q[1], (q[0] + r[0]) / 2, (q[1] + r[1]) / 2); });
+  const l = pts[pts.length - 1]; path.lineTo(l[0], l[1]);
+};
+
+const doodle = (x, y, rot, R0) => {                               // zebra / intestine shape: wavy rings that follow the outline, never fully closed
+  const M = 40, el = R(1.1, 1.9), jag = .03 + pointy * .1;
+  const lobes = Array.from({ length: 3 }, (_, k) => [k + 2, R(0, 6.28), R(.1 + pointy * .1, .22 + pointy * .25) / (k * .5 + 1)]);
+  const prof = Array.from({ length: M }, (_, k) => Math.max(.3, 1 + lobes.reduce((u, l) => u + Math.cos(l[0] * k / M * 6.283 + l[1]) * l[2], 0) + R(-jag, jag)));
+  const ring = (sc, ox, oy, waves) => prof.map((v, k) => {
+    const a = k / M * 6.283, r = v * sc * (1 + waves.reduce((u, w) => u + Math.sin(w[0] * a + w[1]) * w[2], 0));
+    return [ox + Math.cos(a) * r * R0 * el, oy + Math.sin(a) * r * R0];
+  });
+  const piece = (pts, frac) => { const st = Math.floor(R(0, M)); return Array.from({ length: Math.max(3, Math.floor(M * frac)) }, (_, k) => pts[(st + k) % M]); };
+  const outer = ring(1, 0, 0, []);
+  const shape = new Path2D(); smoothPath(shape, outer);          // closed, only used to keep the inside lines in
+  const edge = new Path2D(); openCurve(edge, piece(outer, R(.8, .95)));
+  const inner = new Path2D(), n = Math.floor(R(3, 4 + R0 / 12));
+  each(n, j => {
+    const sc = 1 - (j + 1) / (n + 1) * R(.85, 1.05);
+    if (sc < .08) { return; }
+    const waves = [[Math.floor(R(4, 9)), R(0, 6.28), R(.03, .08)], [Math.floor(R(9, 15)), R(0, 6.28), R(.01, .04)]];   // the wiggle of the guts
+    const pts = ring(sc, R(-.06, .06) * R0 * (1 - sc), R(-.06, .06) * R0 * (1 - sc), waves);
+    openCurve(inner, piece(pts, R(.45, .9)));
+    if (Math.random() < .3) { openCurve(inner, piece(pts, R(.15, .3))); }   // an extra short stroke, like a stripe splitting
+  });
+  const cr = Math.cos(rot), sr = Math.sin(rot);
+  const it = add({ doodle: true, x, y, rot, shape, edge, inner, e: .15, lw: 1.1, lineAlpha: R(.84, 1), col: LINE,
+                   pts: outer.map(q => [x + q[0] * cr - q[1] * sr, y + q[0] * sr + q[1] * cr]) });   // pts: only for the border check
+  let t = 0;
+  grow({ update() { t++; const e = Math.min(1, t / 6); it.e = .15 + .85 * e * (2 - e); if (t >= 6) { this.done = true; } } }, [it]);
+};
+
+/* ---------------------------------------------------------------- circle */
+
+const circleBegin = (c, p) => {
+  c.circle = add({ circle: true, x: p[0], y: p[1], r: 0, lw: 1.1, lineAlpha: R(.84, 1), col: LINE,
+                   fill: Math.random() < .5,                // half of them stay empty
+                   inward: Math.random() < .5,              // solid at the rim and clear in the middle, or the other way round
+                   rings: R(12, 40), ph: R(0, 6.28), gamma: R(.7, 1.8) });
+  c.hold.push(c.circle);
+};
+
+const circleMove = (c, p) => { c.circle.r = Math.hypot(p[0] - c.circle.x, p[1] - c.circle.y); };   // radius = distance from the centre
+
+const grainDisc = (it, col) => {                                  // stippled gradient: each pixel is on or off, with the chance set by the gradient
+  const m = col.match(/[\d.]+/g).map(Number), D = Math.min(2400, Math.ceil(it.r * 6)), k = D / 2;
+  const cv = document.createElement('canvas'); cv.width = D; cv.height = D;
+  const x = cv.getContext('2d'), img = x.createImageData(D, D), u = new Uint32Array(img.data.buffer);
+  const on = ((Math.round(255 * (m[3] === undefined ? 1 : m[3])) << 24) | (m[2] << 16) | (m[1] << 8) | m[0]) >>> 0;
+  u.forEach((_, i) => {
+    const d = Math.hypot(i % D - k + .5, Math.floor(i / D) - k + .5) / k;
+    if (d > 1) { return; }
+    const g = Math.pow(it.inward ? d : 1 - d, it.gamma) * (.7 + .3 * Math.sin(d * it.rings + it.ph));   // gradient with concentric bands
+    if (Math.random() < g) { u[i] = on; }
+  });
+  x.putImageData(img, 0, 0);
+  return cv;
 };
 
 /* ---------------------------------------------------------------- electric lines */
@@ -447,30 +502,6 @@ const squareMove = (c, p) => {
 
 const drawLineWidth = () => Math.min(18, Math.max(1, size * .18));
 
-const RAMPS = [' .:-=+*#%@', ' .,:;~=+*%#@', ' .`-/\\|+=*#@', ' .:-~=<>/\\|+*#%@&', ' ,;:!|=+*#%@'];       // only lines and symbols, no letters or numbers
-const asciiRows = (txt, ramp, cols) => {                          // the word is drawn small, then read cell by cell and rewritten with characters
-  const cw = 4, ch = 7, w = cols * cw, h = Math.ceil(w / Math.max(1, txt.length) * 1.5 / ch) * ch;
-  const c = document.createElement('canvas'); c.width = w; c.height = h; const x = c.getContext('2d');
-  x.fillStyle = '#000'; x.textAlign = 'center'; x.textBaseline = 'middle';
-  const font = f => `900 ${f}px "Arial Black", Arial, sans-serif`;   // heavy letters read best once turned into characters
-  let fs = h * .95; x.font = font(fs);
-  const mw = x.measureText(txt).width; if (mw > w * .96) { fs *= w * .96 / mw; x.font = font(fs); }
-  x.fillText(txt, w / 2, h / 2);
-  const d = x.getImageData(0, 0, w, h).data, rows = h / ch;
-  return Array.from({ length: rows }, (_, r) => Array.from({ length: cols }, (_, k) => {
-    const cov = Array.from({ length: cw * ch }, (_, i) => d[(((r * ch + Math.floor(i / cw)) * w) + k * cw + i % cw) * 4 + 3]).reduce((u, v) => u + v, 0) / (cw * ch) / 255;
-    return cov < .15 ? ' ' : ramp[Math.min(ramp.length - 1, 1 + Math.floor(cov * (ramp.length - 1)))];
-  }).join(''));
-};
-
-const bigText = (c, p) => {                                       // big word on top of everything, written in ASCII characters
-  const box = document.getElementById('bigtext'), txt = ((box && box.value.trim()) || choice(BIG_TEXT)).toUpperCase().slice(0, 14);
-  const cols = Math.min(180, Math.max(48, txt.length * 18)), cwu = bigSize * txt.length * 1.6 / cols;
-  const rows = asciiRows(txt, choice(RAMPS), cols), k = Math.min(1, (W0 - 2 * EDGE - 12) / (cols * cwu), (H0 - 2 * EDGE - 12) / (rows.length * cwu * 1.83)), cw = cwu * k;
-  const hw = cols * cw / 2 + 6, hh = rows.length * cw * 1.83 / 2 + 6;
-  add({ big: true, rows, x: clamp(p[0], EDGE + hw, W0 - EDGE - hw), y: clamp(p[1], EDGE + hh, H0 - EDGE - hh), cwu: cw, rot: R(-.05, .05) });
-};
-
 /* ---------------------------------------------------------------- drawing and export */
 
 const smoothPath = (c, p) => {                                    // rounded outline through the midpoints
@@ -485,12 +516,7 @@ const renderItem = (c, it) => {
   c.lineJoin = 'round'; c.lineCap = 'round';
   if (it.square) {
     if (it.grid && it.foreground) {
-      if (bg === 0) {
-        c.clearRect(it.x, it.y, it.side[0], it.side[1]);
-      } else {
-        c.fillStyle = bg === 2 ? '#000' : '#fff';
-        c.fillRect(it.x, it.y, it.side[0], it.side[1]);
-      }
+      c.clearRect(it.x, it.y, it.side[0], it.side[1]);
     }
     if (it.grid) {
       c.lineWidth = it.lw; c.strokeStyle = tintAlpha(it.col, it.lineAlpha);
@@ -500,45 +526,24 @@ const renderItem = (c, it) => {
     it.marks.forEach(p => { c.fillStyle = tint(INK); c.fillRect(p[0] - 3, p[1] - 3, 6, 6); });
     return;
   }
-  if (it.hatch) {                                                // noisy, crossing, curving hatching clipped to the outline, nothing behind
-    if (it.pts.length < 3) { return; }
-    const outline = () => { c.beginPath(); smoothPath(c, it.pts); };
-    const xs = it.pts.map(q => q[0]), ys = it.pts.map(q => q[1]);
-    const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
-    const rad = Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) / 2 + 2;
-    const segs = Math.max(2, Math.ceil(2 * rad / 6));
-    c.strokeStyle = tintAlpha(it.col, it.lineAlpha);
-    c.save(); outline(); c.clip();
-    it.layers.forEach((L, n) => {
-      const dx = Math.cos(L.ang), dy = Math.sin(L.ang), sd = it.seed + n * 31;
-      let o = -rad * 1.4;                                       // a bit wider, since curved lines drift sideways
-      each(Math.ceil(2.8 * rad / L.gap * 2) + 1, i => {
-        o += L.gap * (.35 + 1.3 * noise(i * .35, sd));          // uneven spacing, lines bunch up and spread out
-        if (o > rad * 1.4) { return; }
-        c.beginPath(); c.lineWidth = it.lw * (.45 + noise(i * .6 + 3, sd) * 1.1);
-        let pen = false;
-        each(segs + 1, k => {
-          const t = -rad + k * 2 * rad / segs;
-          const wob = (noise(i * .22, k * .1, sd) - .5) * L.gap * L.wob * 2 + (noise(i * 1.7, k * .45, sd + 9) - .5) * L.gap * .6;
-          const curve = L.bend * t * t / rad * .35 + Math.sin(t * .02 + i * .3 + sd) * L.gap * L.bend;
-          if (noise(i * .9 + 7, k * .15, sd) < L.brk || (L.part < 1 && noise(o * .01, t * .01, sd + 5) > L.part)) { pen = false; return; }
-          const q = o + wob + curve, x = cx - dy * q + dx * t, y = cy + dx * q + dy * t;
-          if (pen) { c.lineTo(x, y); } else { c.moveTo(x, y); pen = true; }
-        });
-        c.stroke();
-      });
-    });
-    c.restore();
-    outline(); c.lineWidth = it.lw * 1.2; c.stroke();
-    return;
+  if (it.circle) {
+    c.save(); c.beginPath(); c.rect(EDGE, EDGE, W0 - 2 * EDGE, H0 - 2 * EDGE); c.clip();   // cut flat at the page border (half circles)
+    if (it.fill && !it.live && it.r >= 3) {                       // the grain is made once, and again only when the colour changes
+      const col = tint(INK);
+      if (it.grainCol !== col) { it.grain = grainDisc(it, col); it.grainCol = col; }
+      const sm = c.imageSmoothingEnabled; c.imageSmoothingEnabled = false;
+      c.drawImage(it.grain, it.x - it.r, it.y - it.r, it.r * 2, it.r * 2);
+      c.imageSmoothingEnabled = sm;
+    }
+    c.beginPath(); c.arc(it.x, it.y, Math.max(0, it.r), 0, 6.283);
+    c.lineWidth = it.lw; c.strokeStyle = tintAlpha(it.col, it.lineAlpha); c.stroke();
+    c.restore(); return;
   }
-  if (it.rows) {
-    c.save(); c.translate(it.x, it.y); c.rotate(it.rot); c.textBaseline = 'top'; c.textAlign = 'left';
-    const lh = it.cwu * 1.83;
-    c.font = `700 ${it.cwu * 1.75}px "Courier New", monospace`; c.textAlign = 'center';
-    const x0 = -it.rows[0].length * it.cwu / 2, y0 = -it.rows.length * lh / 2;
-    c.fillStyle = tint(BIGINK);
-    it.rows.forEach((l, k) => { [...l].forEach((ch, j) => { if (ch !== ' ') { c.fillText(ch, x0 + (j + .5) * it.cwu, y0 + k * lh); } }); });
+  if (it.doodle) {
+    c.save(); c.translate(it.x, it.y); c.rotate(it.rot); c.scale(it.e, it.e);
+    c.strokeStyle = tintAlpha(it.col, it.lineAlpha);
+    c.save(); c.clip(it.shape); c.lineWidth = it.lw * .8 / it.e; c.stroke(it.inner); c.restore();
+    c.lineWidth = it.lw / it.e; c.stroke(it.edge);
     c.restore(); return;
   }
   if (it.lines) {
@@ -577,11 +582,9 @@ const savePNG = () => {
   if (W * H > 150e6) { alert('Too large for the browser: lower DPI or size.'); return; }
   const c = document.createElement('canvas'); c.width = W; c.height = H;
   const x = c.getContext('2d'); x.scale(W / W0, W / W0);
-  if (bg) { x.fillStyle = bg === 1 ? '#fff' : '#000'; x.fillRect(0, 0, W0, H0); }
-  items.filter(o => !o.big && !o.foreground && !o.aboveGrid && !o.dead).forEach(o => renderItem(x, o));
-  items.filter(o => o.foreground && !o.big && !o.aboveGrid && !o.dead).forEach(o => renderItem(x, o));
-  items.filter(o => o.aboveGrid && !o.big && !o.dead).forEach(o => renderItem(x, o));
-  items.filter(o => o.big).forEach(o => renderItem(x, o));
+  items.filter(o => !o.foreground && !o.aboveGrid && !o.dead).forEach(o => renderItem(x, o));
+  items.filter(o => o.foreground && !o.aboveGrid && !o.dead).forEach(o => renderItem(x, o));
+  items.filter(o => o.aboveGrid && !o.dead).forEach(o => renderItem(x, o));
   c.toBlob(async blob => {
     download(new Blob([withDpi(new Uint8Array(await blob.arrayBuffer()), DPI)], { type: 'image/png' }), fileName());
   }, 'image/png');
@@ -613,10 +616,10 @@ const withDpi = (bytes, dpi) => {                                 // writes the 
 const BR = {
   drawline: { step: 1, begin: drawLineBegin, move: drawLineMove },
   square:  { step: 2, begin: squareBegin, move: squareMove },
-  hatch:   { step: 7, begin(c) { c.sp = []; c.hd = 0; c.hol = 'hatch'; hatchAng = choice([.785, -.785, .55, -1]); c.body = add(ink({ pts: [] }, c.hol)); c.hold.push(c.body); }, move: spikeMove },
+  hatch:   { step: 4, begin(c) { c.acc = 1e9; c.hd = 0; }, move: doodleMove },
+  circle:  { step: 2, begin: circleBegin, move: circleMove },
   spikes: { step: 7, begin(c) { c.sp = []; c.hd = 0; c.hol = Math.random() < .35; c.body = add(ink({ pts: [] }, c.hol)); c.hold.push(c.body); }, move: spikeMove },
   maps:   { step: 4, begin(c) { c.acc = 1e9; c.hd = 0; }, move: mapMove },
   lines:  { step: 3, begin(c, p) { c.g = [snap(p)]; c.dist = 0; c.d = [1, 0]; c.wire = add({ pts: [c.g[0].slice()], lw: .8, col: LINE }); c.hold.push(c.wire); }, move: lineMove },
   text:   { step: 1e9, begin: textBlock, move() { } },
-  big:    { step: 1e9, begin: bigText, move() { } },
 };
