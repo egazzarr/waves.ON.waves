@@ -1,11 +1,14 @@
 /* RADIO LINES - generative drawing that follows your mouse (p5.js 1.x and 2.x)
    Move the mouse over the picture: marks grow where you move, in the direction you move,
    and growing thorns bend towards the mouse.
-   Black / grey lines on a TRANSPARENT background, with shapes filled white or black.
+   ONE ink colour on a TRANSPARENT background: no white, no grey mixes. "White" shapes and pale lines
+   are cut out (they erase what is under them, leaving transparent holes); grey is the ink at lower opacity.
 
-   Brushes   1 spikes   2 maps   3 lines   4 small text (click)   6 draw (drag)   7 grid (drag)
+   Brushes   1 spikes   2 maps   3 lines   6 draw (drag)   7 grid (drag)
              8 doodle (loose organic shapes near the path, see-through, with wavy open rings inside like zebra stripes / intestines)
              9 circle (drag from the centre: a circle line, sometimes filled with a grainy concentric gradient)
+   Title     a bold title aligned to the left of the page (text, font, size and height in the panel).
+             Wherever a shape meets the title it is inverted: the overlap turns transparent.
    Keys      L live (draw by moving / only while pressed)
              C color (black / blue / gold)   Z undo   X clear   G more strokes
              S save PNG (named <file name>_<colour>.png)   [ ] brush size
@@ -15,7 +18,13 @@ const SIZE_MM = [160, 290];          // width, height in mm of the printed page
 const DPI = 400;                    // PNG resolution: 300, 450, 600 ...
 const WHITE = 0.3, BLACK = 0.2;      // chance that a map shape is filled white / black (the rest stays transparent)
 
-const TEXT = ['We hold these black rectangles in our hands all day long.'];
+const TITLE = 'RADIO\nTALES';        // the title shown at start (edit it in the panel; Enter = new line)
+const TITLE_X = 40;                  // left margin of the title (design units)
+const FONTS = [                      // [family, weight]: bold cuts loaded in index.html (+ a few system fonts)
+  ['Anton', 400], ['Oswald', 700], ['Space Grotesk', 700], ['Syne', 800], ['IBM Plex Mono', 700],
+  ['Merriweather', 900], ['Bodoni Moda', 900],
+  ['Helvetica', 700], ['Arial', 900],
+];
 const LABELS = ['A0', 'A1', 'A2', 'A12', 'D0', 'D7', 'IRQ', 'NMI', 'RDY', 'CLK', 'GND', '+5V', 'R/W', 'PHI2', 'TX', 'RX', 'PTT', 'ANT', 'SQL', 'DSC'];
 
 const EDGE = 16;                      // nothing is drawn closer than this to the border (design units, of 1000 across)
@@ -30,7 +39,8 @@ const COLORS = {                     // ink colour of the whole drawing (key C c
 const hasGridMask = () => items.some(o => o.square && o.grid && !o.dead);
 
 let hollowNow = false, items = [], growers = [], strokes = [], strokeLayers = {}, SID = 0, count = 0, cur = null, down = false;
-let brush = 'spikes', size = 40, textSize = 8, growth = 1, pointy = 0.3, pull = 0.5, live = true;
+let brush = 'spikes', size = 40, growth = 1, pointy = 0.3, pull = 0.5, live = true;
+let titleSize = 150, titleLead = 0.95, titleFont = 0, titleY = 0.04;
 let mp = null, mouseHd = 0, lastMove = 0, ctx = null, layer = null, lctx = null, ui = {};
 let colorName = 'black', PAL = {};
 
@@ -61,14 +71,14 @@ const fits = o => {                                               // false when 
   if (o.lines) { const w = Math.max(...o.lines.map(l => l.length)) * o.size * .62, h = o.lines.length * (o.lh || o.size * 1.4); return inside(o.x, o.y - h) && inside(o.x + w, o.y + h); }
   const ps = o.multi ? o.pts.flat() : o.pts; return !ps || ps.every(q => inside(q[0], q[1]));
 };
-const margin = () => EDGE + (['text', 'square', 'circle'].includes(brush) ? 0 : size * 1.6);
+const margin = () => EDGE + (['square', 'circle'].includes(brush) ? 0 : size * 1.6);
 const keep = p => { const m = margin(); return [clamp(p[0], m, W0 - m), clamp(p[1], m, H0 - m)]; };
 const bake = o => {
   if (!fits(o)) { o.dead = true; return; }
   if (o.aboveGrid) { o.live = true; return; }
   if (o.foreground) { o.live = true; return; }
   o.live = false;
-  if (!o.foreground && lctx) { renderItem(lctx, o); }
+  if (lctx) { renderItem(lctx, o); }
 };
 const rebuild = () => { lctx.clearRect(0, 0, W0, H0); items.forEach(o => { if (!o.live && !o.foreground && !o.dead) { renderItem(lctx, o); } }); };
 
@@ -82,17 +92,14 @@ function setup() {
   cv.style.width = 'min(94vw, 560px)'; cv.style.height = 'auto'; cv.style.cursor = 'crosshair'; cv.style.touchAction = 'none';
   cv.style.background = 'repeating-conic-gradient(#d8d8d8 0% 25%, #f2f2f2 0% 50%) 0 0 / 24px 24px';
   layer = document.createElement('canvas'); layer.width = W0; layer.height = H0; lctx = layer.getContext('2d');
-  buildUI(cv); attach(cv);
+  buildUI(cv); attach(cv); setColor(colorName); loadFont();
 }
 
 function draw() {
   advance();
   if (cur && performance.now() - lastMove > 300) { endStroke(cur); cur = null; }
   ctx.clearRect(0, 0, W0, H0);
-  ctx.drawImage(layer, 0, 0);
-  items.forEach(o => { if (o.live && !o.foreground && !o.aboveGrid && !o.dead) { renderItem(ctx, o); } });
-  items.forEach(o => { if (o.live && o.foreground && !o.aboveGrid && !o.dead) { renderItem(ctx, o); } });
-  items.forEach(o => { if (o.live && o.aboveGrid && !o.dead) { renderItem(ctx, o); } });
+  scene(ctx, true);
   if (growers.length === 0 && !cur && !down) { noLoop(); }
 }
 
@@ -103,14 +110,14 @@ const attach = cv => {
   cv.addEventListener('pointerdown', e => {
     down = true; const p = pos(e); mp = p; lastMove = performance.now();
     if (cur) { endStroke(cur); cur = null; }
-    if (brush === 'text') { startStroke(p); endStroke(cur); cur = null; } else { startStroke(p); }
+    startStroke(p);
     loop(); e.preventDefault();
   });
   cv.addEventListener('pointermove', e => {
     const p = pos(e);
     if (mp) { const d = Math.hypot(p[0] - mp[0], p[1] - mp[1]); if (d > 2) { mouseHd = lerpA(mouseHd, Math.atan2(p[1] - mp[1], p[0] - mp[0]), .3); } }
     mp = p; lastMove = performance.now();
-    if (!(live || down) || brush === 'text') { return; }
+    if (!(live || down)) { return; }
     if (!cur) { startStroke(p); loop(); return; }
     const l = cur.last, d = Math.hypot(p[0] - l[0], p[1] - l[1]);
     if (d < BR[brush].step) { return; }
@@ -122,8 +129,8 @@ const attach = cv => {
   });
   cv.addEventListener('pointerleave', () => { mp = null; if (cur) { endStroke(cur); cur = null; } });
   window.addEventListener('keydown', e => {
-    if (e.target && ['INPUT', 'TEXTAREA'].includes(e.target.tagName)) { return; }
-    const k = e.key.toLowerCase(), b = { 1: 'spikes', 2: 'maps', 3: 'circuits', 4: 'text', 6: 'drawline', 7: 'square', 8: 'hatch', 9: 'circle' }[k];
+    if (e.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) { return; }
+    const k = e.key.toLowerCase(), b = { 1: 'spikes', 2: 'maps', 3: 'circuits', 6: 'drawline', 7: 'square', 8: 'hatch', 9: 'circle' }[k];
     if (b) { pick(b === 'circuits' ? 'lines' : b); }
     if (k === 'z') { undo(); } if (k === 'x') { clearAll(); } if (k === 'g') { each(6, autoStroke); settle(); loop(); } if (k === 's') { savePNG(); }
     if (k === 'l') { toggle('live'); } if (k === 'c') { cycleColor(); }
@@ -141,11 +148,11 @@ const endStroke = c => {
   (c.hold || []).forEach(bake); c.hold = [];
 };
 
-const pick = b => { brush = b; ['drawline', 'spikes', 'maps', 'lines', 'text', 'square', 'hatch', 'circle'].forEach(k => { if (ui[k]) ui[k].style.fontWeight = k === b ? 'bold' : 'normal'; }); };
+const pick = b => { brush = b; ['drawline', 'spikes', 'maps', 'lines', 'square', 'hatch', 'circle'].forEach(k => { if (ui[k]) ui[k].style.fontWeight = k === b ? 'bold' : 'normal'; }); };
 const toggle = () => { live = !live; ui.live.textContent = 'live (L): ' + (live ? 'on' : 'off'); loop(); };
 const setColor = n => {                                           // every dark tone becomes the chosen colour; white and pale stay as they are
-  colorName = n; const c = COLORS[n], rgba = (a, w = 0) => `rgba(${c.map(v => Math.round(v + (255 - v) * w)).join(',')},${a})`;
-  PAL = c ? { [INK]: rgba(.97), [LINE]: rgba(.88), [GREYL]: rgba(.8, .35), [TXT]: rgba(.88) } : {};
+  colorName = n; const c = COLORS[n] || [8, 8, 8], rgba = a => `rgba(${c.join(',')},${a})`;
+  PAL = { [INK]: rgba(.97), [LINE]: rgba(.88), [GREYL]: rgba(.55), [TXT]: rgba(.88) };   // grey = same ink, more transparent
   if (ui.color) { ui.color.textContent = 'color (C): ' + n; }
   if (lctx) { rebuild(); } loop();
 };
@@ -160,15 +167,22 @@ const buildUI = cv => {
   ui.square = btn('grid (7)', () => pick('square'));
   ui.hatch = btn('doodle (8)', () => pick('hatch'));
   ui.circle = btn('circle (9)', () => pick('circle'));
-  ['spikes (1)', 'maps (2)', 'circuits (3)', 'text (4)'].forEach((t, i) => { ui[['spikes', 'maps', 'lines', 'text'][i]] = btn(t, () => pick(['spikes', 'maps', 'lines', 'text'][i])); });
+  ['spikes (1)', 'maps (2)', 'circuits (3)'].forEach((t, i) => { ui[['spikes', 'maps', 'lines'][i]] = btn(t, () => pick(['spikes', 'maps', 'lines'][i])); });
   row();
   const textControl = (label, control) => {
     const d = document.createElement('div'), l = document.createElement('label');
     l.textContent = label + ' '; l.appendChild(control); d.appendChild(l); bar.appendChild(d); return control;
   };
-  const smallText = Object.assign(document.createElement('textarea'), { value: TEXT[0], rows: 3, cols: 30, id: 'smalltext' });
-  smallText.style.verticalAlign = 'top';
-  textControl('small text (4)', smallText);
+  ui.showTitle = Object.assign(document.createElement('input'), { type: 'checkbox', checked: true, id: 'showtitle' });
+  ui.showTitle.onchange = () => loop();
+  textControl('show title', ui.showTitle);
+  ui.title = Object.assign(document.createElement('textarea'), { value: TITLE, rows: 3, cols: 30, id: 'title' });
+  ui.title.style.verticalAlign = 'top'; ui.title.oninput = () => loop();
+  textControl('title', ui.title);
+  ui.font = document.createElement('select');
+  FONTS.forEach(([f, w], i) => { const o = new Option(f, i); o.style.font = `${w} 14px "${f}"`; ui.font.appendChild(o); });
+  ui.font.value = titleFont; ui.font.onchange = () => { titleFont = +ui.font.value; loadFont(); };
+  textControl('title font', ui.font);
   row(); ui.live = btn('live (L): on', toggle);
   ui.color = btn('color (C): black', cycleColor);
   row(); textControl('file name', Object.assign(document.createElement('input'), { value: 'radio-lines', size: 16, id: 'filename' }));
@@ -178,7 +192,9 @@ const buildUI = cv => {
     s.oninput = () => fn(+s.value); d.appendChild(s); return s;
   };
   ui.size = slider('brush size / line thickness', 10, 100, 1, size, v => { size = v; });
-  ui.textsize = slider('small text size', 4, 20, 1, textSize, v => { textSize = v; });
+  slider('title size  ', 20, 400, 1, titleSize, v => { titleSize = v; loop(); });
+  slider('title line spacing', .5, 2, .01, titleLead, v => { titleLead = v; loop(); });
+  slider('title height', 0, 1, .01, titleY, v => { titleY = v; loop(); });
   slider('growth      ', .2, 2, .05, growth, v => { growth = v; });
   slider('pointy      ', 0, 1, .05, pointy, v => { pointy = v; });
   slider('mouse pull  ', 0, 1, .05, pull, v => { pull = v; });
@@ -195,7 +211,7 @@ const undo = () => { const id = strokes.pop(); delete strokeLayers[id]; items = 
 const clearAll = () => { items = []; growers = []; strokes = []; strokeLayers = {}; cur = null; rebuild(); loop(); };
 
 const autoStroke = () => {                                        // a stroke of any brush, starting near the mouse and heading the way it moves
-  const b = choice(['spikes', 'spikes', 'maps', 'maps', 'lines', 'hatch', 'hatch', 'circle', 'square', 'drawline', 'text']), br = BR[b], s0 = size, near = mp && performance.now() - lastMove < 2500;
+  const b = choice(['spikes', 'spikes', 'maps', 'maps', 'lines', 'hatch', 'hatch', 'circle', 'square', 'drawline']), br = BR[b], s0 = size, near = mp && performance.now() - lastMove < 2500;
   size = s0 * R(.6, 1.3);
   const p = keep(near ? [mp[0] + R(-60, 60), mp[1] + R(-60, 60)] : [R(.1, .9) * W0, R(.1, .9) * H0]);
   let a = near ? mouseHd + R(-1.1, 1.1) : R(0, 6.28);
@@ -442,17 +458,7 @@ const chip = (x, y) => {
   add({ lines: [choice(['R', 'C', 'U', 'Q', 'FB', 'J']) + Math.floor(R(1, 60))], x: x + 2, y: y - 6, size: 4.6 }, true);
 };
 
-/* ---------------------------------------------------------------- text */
-
-const textBlock = (c, p) => {                                     // small typewriter block: normal, upside down or mirrored
-  const per = Math.floor(R(26, 40)), input = document.getElementById('smalltext'), source = input && input.value ? input.value : TEXT[0];
-  const lines = source.split(/\r?\n/).flatMap(line => line.split(' ').reduce((acc, w) => {
-    if ((acc[acc.length - 1] + w).length > per) { acc.push(w + ' '); } else { acc[acc.length - 1] += w + ' '; }
-    return acc;
-  }, ['']));
-  const sz = textSize, w = Math.max(...lines.map(l => l.length)) * sz * .62, h = lines.length * sz * 1.4;
-  add({ lines, x: clamp(p[0], EDGE, W0 - EDGE - w), y: clamp(p[1], EDGE + sz, H0 - EDGE - h), size: sz, mode: 0, halo: Math.random() < .6 }, true);
-};
+/* ---------------------------------------------------------------- draw / grid */
 
 const drawLineBegin = (c, p) => {
   c.line = add({ pts: [p.slice()], lw: drawLineWidth(), col: LINE });
@@ -552,7 +558,7 @@ const renderItem = (c, it) => {
     c.font = `300 ${it.size}px "Merriweather", Georgia, serif`; c.textBaseline = 'middle';
     it.lines.forEach((l, k) => {
       const y = k * (it.lh || it.size * 1.4);
-      if (it.halo) { c.lineWidth = 3.5; c.strokeStyle = WHITEF; c.strokeText(l, 0, y); }
+      if (it.halo) { c.save(); c.globalCompositeOperation = 'destination-out'; c.lineWidth = 3.5; c.strokeStyle = '#000'; c.strokeText(l, 0, y); c.restore(); }
       c.fillStyle = tint(TXT); c.fillText(l, 0, y);
     });
     c.restore(); return;
@@ -563,9 +569,15 @@ const renderItem = (c, it) => {
     path.forEach((q, i) => i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1]));
     if (it.closed && path.length) { c.closePath(); }
   });
-  if (it.fill) { c.fillStyle = tintAlpha(it.fill, it.fillAlpha); c.fill(); }
-  if (it.lw) { c.lineWidth = it.lw; c.strokeStyle = tintAlpha(it.col, it.lineAlpha); c.stroke(); }
+  if (it.fill) { erasing(c, it.fill, () => { c.fillStyle = paint(it.fill, it.fillAlpha); c.fill(); }); }
+  if (it.lw) { erasing(c, it.col, () => { c.lineWidth = it.lw; c.strokeStyle = paint(it.col, it.lineAlpha); c.stroke(); }); }
 };
+const ERASE = [WHITEF, PALE];                                     // white / pale = cut out, never painted
+const erasing = (c, col, fn) => {
+  if (!ERASE.includes(col)) { fn(); return; }
+  c.save(); c.globalCompositeOperation = 'destination-out'; fn(); c.restore();
+};
+const paint = (col, alpha = 1) => ERASE.includes(col) ? `rgba(0,0,0,${alpha})` : tintAlpha(col, alpha);
 const tint = v => PAL[v] || v;                                    // the chosen colour, applied when drawing (so C recolours everything)
 const tintAlpha = (v, alpha = 1) => {
   const color = tint(v);
@@ -576,15 +588,73 @@ const tintAlpha = (v, alpha = 1) => {
   return `rgba(${parts.slice(0, 3).join(',')},${Math.max(0, Math.min(1, Number(parts[3]) * alpha))})`;
 };
 
+/* ---------------------------------------------------------------- title and layers */
+
+// the whole picture: all the shapes, then the title inverted against them.
+// cached = use the baked layer (screen); otherwise every item is drawn again (PNG at full resolution)
+const scene = (c, cached) => {
+  const L = items.filter(o => !o.dead);
+  if (cached) { c.drawImage(layer, 0, 0); }
+  L.forEach(o => { if (!o.foreground && !o.aboveGrid && (!cached || o.live)) { renderItem(c, o); } });
+  L.forEach(o => { if (o.foreground && !o.aboveGrid) { renderItem(c, o); } });
+  L.forEach(o => { if (o.aboveGrid) { renderItem(c, o); } });
+  drawTitle(c);
+};
+
+const fontCss = () => { const [f, w] = FONTS[titleFont]; return `${w} ${titleSize}px "${f}", Helvetica, Arial, sans-serif`; };
+const loadFont = () => { loop(); if (document.fonts) { document.fonts.load(fontCss()).then(() => loop(), () => {}); } };
+
+const titleLines = c => {                                         // the typed lines, wrapped by words to the page width
+  if (ui.showTitle && !ui.showTitle.checked) { return null; }   // title switched off: nothing is drawn (screen and PNG)
+  const txt = ui.title ? ui.title.value : TITLE;
+  if (!txt.trim()) { return null; }
+  c.save(); c.font = fontCss();
+  const maxW = W0 - 2 * TITLE_X;
+  const lines = txt.split(/\r?\n/).flatMap(par => par.split(/\s+/).filter(Boolean).reduce((acc, w) => {
+    const l = acc[acc.length - 1], t = l ? l + ' ' + w : w;
+    if (l && c.measureText(t).width > maxW) { acc.push(w); } else { acc[acc.length - 1] = t; }
+    return acc;
+  }, ['']));
+  c.restore();
+  return lines;
+};
+
+const paintTitle = (c, lines, col) => {                           // bold, aligned left
+  const lh = titleSize * titleLead, y0 = Math.max(EDGE, EDGE + titleY * (H0 - 2 * EDGE - lines.length * lh));
+  c.save(); c.font = fontCss(); c.textAlign = 'left'; c.textBaseline = 'top'; c.fillStyle = col;
+  lines.forEach((l, k) => c.fillText(l, TITLE_X, y0 + k * lh));
+  c.restore();
+};
+
+const spare = {};                                                 // spare canvases, reused
+const sized = (k, w, h) => {
+  const s = spare[k] || (spare[k] = document.createElement('canvas'));
+  if (s.width !== w || s.height !== h) { s.width = w; s.height = h; }
+  return s;
+};
+const scratch = (w, h) => sized('title', w, h);
+
+// c already holds all the shapes. The title is XOR-ed with them: where a letter meets a shape
+// both disappear (transparent); everywhere else the title is the plain ink colour.
+const drawTitle = c => {
+  const lines = titleLines(c);
+  if (!lines) { return; }
+  const cv = c.canvas, m = c.getTransform(), s = scratch(cv.width, cv.height), sc = s.getContext('2d');
+  sc.setTransform(1, 0, 0, 1, 0, 0); sc.globalCompositeOperation = 'source-over'; sc.clearRect(0, 0, s.width, s.height);
+  sc.setTransform(m); paintTitle(sc, lines, tint(INK));
+  sc.setTransform(1, 0, 0, 1, 0, 0); sc.globalCompositeOperation = 'destination-out'; sc.drawImage(cv, 0, 0);   // title only where nothing is under it
+  sc.globalCompositeOperation = 'source-over';
+  c.save(); c.globalCompositeOperation = 'destination-out'; paintTitle(c, lines, '#000'); c.restore();        // letters cut through the shapes
+  c.save(); c.setTransform(1, 0, 0, 1, 0, 0); c.drawImage(s, 0, 0); c.restore();
+};
+
 const savePNG = () => {
   settle();
   const W = Math.round(SIZE_MM[0] / 25.4 * DPI), H = Math.round(SIZE_MM[1] / 25.4 * DPI);
   if (W * H > 150e6) { alert('Too large for the browser: lower DPI or size.'); return; }
   const c = document.createElement('canvas'); c.width = W; c.height = H;
   const x = c.getContext('2d'); x.scale(W / W0, W / W0);
-  items.filter(o => !o.foreground && !o.aboveGrid && !o.dead).forEach(o => renderItem(x, o));
-  items.filter(o => o.foreground && !o.aboveGrid && !o.dead).forEach(o => renderItem(x, o));
-  items.filter(o => o.aboveGrid && !o.dead).forEach(o => renderItem(x, o));
+  scene(x, false);
   c.toBlob(async blob => {
     download(new Blob([withDpi(new Uint8Array(await blob.arrayBuffer()), DPI)], { type: 'image/png' }), fileName());
   }, 'image/png');
@@ -621,5 +691,4 @@ const BR = {
   spikes: { step: 7, begin(c) { c.sp = []; c.hd = 0; c.hol = Math.random() < .35; c.body = add(ink({ pts: [] }, c.hol)); c.hold.push(c.body); }, move: spikeMove },
   maps:   { step: 4, begin(c) { c.acc = 1e9; c.hd = 0; }, move: mapMove },
   lines:  { step: 3, begin(c, p) { c.g = [snap(p)]; c.dist = 0; c.d = [1, 0]; c.wire = add({ pts: [c.g[0].slice()], lw: .8, col: LINE }); c.hold.push(c.wire); }, move: lineMove },
-  text:   { step: 1e9, begin: textBlock, move() { } },
 };
